@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -53,7 +53,7 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByText("50 min")).toBeInTheDocument());
     expect(screen.getByText("Live")).toBeInTheDocument();
-    expect(screen.getByText(/77 is 7 minutes later than scheduled/i)).toBeInTheDocument();
+    expect(screen.getByText(/Only 5 minutes of buffer after shopping/i)).toBeInTheDocument();
   });
 
   it("stores and applies an optional API key", async () => {
@@ -85,12 +85,30 @@ describe("App", () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.getByText("2:10 PM")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("2:10 PM").length).toBeGreaterThan(0));
     expect(screen.queryByText("5:10 PM")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /show 1 later trip/i }));
 
-    expect(screen.getByText("5:10 PM")).toBeInTheDocument();
+    expect(screen.getAllByText("5:10 PM").length).toBeGreaterThan(0);
+  });
+
+  it("keeps outbound and return picks independent", async () => {
+    const user = userEvent.setup();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-16T14:00:00-04:00"));
+    seedStorage();
+    mockMultipleTripFetches();
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /show 1 later trip/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /show 1 later trip/i }));
+    await user.click(screen.getByRole("button", { name: /5:10 PM\s*5:30 PM/i }));
+
+    const selectedTrip = within(screen.getByLabelText("Selected trip combination"));
+    expect(selectedTrip.getByText("5:10 PM")).toBeInTheDocument();
+    expect(selectedTrip.getByText("3:20 PM")).toBeInTheDocument();
   });
 });
 

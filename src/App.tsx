@@ -5,8 +5,8 @@ import { fetchRoutesServingStop, fetchStopEvents, searchStops } from "./lib/mbta
 import { pairAllTrips } from "./lib/planner";
 import { formatRouteList, intersectRouteLists, routeListsMatch } from "./lib/routes";
 import { defaultSettings, loadAppData, makeId, saveAppData } from "./lib/storage";
-import { formatClock, formatDuration } from "./lib/time";
-import type { AppData, HomeStopPair, StopRef, StopSearchResult, StoreStopPair, Supermarket, TripOption } from "./lib/types";
+import { formatClock, formatDuration, minutesBetween } from "./lib/time";
+import type { AppData, HomeStopPair, LegOption, StopRef, StopSearchResult, StoreStopPair, Supermarket, TripOption } from "./lib/types";
 
 type StopField = "homeOutbound" | "homeReturn" | "storeArrival" | "storeDeparture";
 
@@ -511,23 +511,56 @@ function TripTimetable({
     ? options
     : options.filter((option) => new Date(option.outbound.board.time).getTime() <= cutoff);
   const hiddenCount = options.length - visibleOptions.length;
+  const [selectedOutboundKey, setSelectedOutboundKey] = useState("");
+  const [selectedInboundKey, setSelectedInboundKey] = useState("");
+  const outboundLegs = uniqueLegs(visibleOptions, "outbound");
+  const inboundLegs = uniqueLegs(visibleOptions, "inbound");
+
+  useEffect(() => {
+    if (visibleOptions.length === 0) {
+      setSelectedOutboundKey("");
+      setSelectedInboundKey("");
+      return;
+    }
+
+    const hasSelectedOutbound = outboundLegs.some((leg) => legKey(leg) === selectedOutboundKey);
+    const hasSelectedInbound = inboundLegs.some((leg) => legKey(leg) === selectedInboundKey);
+    if (!hasSelectedOutbound || !hasSelectedInbound) {
+      setSelectedOutboundKey(legKey(visibleOptions[0].outbound));
+      setSelectedInboundKey(legKey(visibleOptions[0].inbound));
+    }
+  }, [visibleOptions, outboundLegs, inboundLegs, selectedOutboundKey, selectedInboundKey]);
+
+  const selectedOutbound = outboundLegs.find((leg) => legKey(leg) === selectedOutboundKey) ?? visibleOptions[0]?.outbound;
+  const selectedInbound = inboundLegs.find((leg) => legKey(leg) === selectedInboundKey) ?? visibleOptions[0]?.inbound;
+  const selectedOption = selectedOutbound && selectedInbound ? buildSelectedTripOption(selectedOutbound, selectedInbound, requestedShoppingMinutes) : undefined;
+
+  function chooseOutbound(key: string) {
+    setSelectedOutboundKey(key);
+  }
+
+  function chooseInbound(key: string) {
+    setSelectedInboundKey(key);
+  }
 
   return (
     <>
-      {visibleOptions.length > 0 ? (
-        <div className="timetable-wrap" aria-live="polite">
-          <div className="timetable" role="table" aria-label="Trip options">
-            <div className="timetable-header" role="row">
-              <span role="columnheader">Leave</span>
-              <span role="columnheader">Arrive</span>
-              <span role="columnheader">Shop</span>
-              <span role="columnheader">Return</span>
-              <span role="columnheader">Home</span>
-              <span role="columnheader">Route</span>
-            </div>
-            {visibleOptions.map((option) => (
-              <TripRow key={option.id} option={option} requestedShoppingMinutes={requestedShoppingMinutes} />
-            ))}
+      {visibleOptions.length > 0 && selectedOption ? (
+        <div className="trip-picker" aria-live="polite">
+          <SelectedTrip option={selectedOption} requestedShoppingMinutes={requestedShoppingMinutes} />
+          <div className="leg-picker-grid">
+            <LegPicker
+              title="To supermarket"
+              legs={outboundLegs}
+              selectedKey={legKey(selectedOption.outbound)}
+              onSelect={chooseOutbound}
+            />
+            <LegPicker
+              title="Back home"
+              legs={inboundLegs}
+              selectedKey={legKey(selectedOption.inbound)}
+              onSelect={chooseInbound}
+            />
           </div>
         </div>
       ) : (
@@ -542,7 +575,7 @@ function TripTimetable({
   );
 }
 
-function TripRow({ option, requestedShoppingMinutes }: { option: TripOption; requestedShoppingMinutes: number }) {
+function SelectedTrip({ option, requestedShoppingMinutes }: { option: TripOption; requestedShoppingMinutes: number }) {
   const hasLiveData =
     option.outbound.board.source === "prediction" ||
     option.outbound.alight.source === "prediction" ||
@@ -551,31 +584,115 @@ function TripRow({ option, requestedShoppingMinutes }: { option: TripOption; req
   const warningText = option.shoppingMinutes < requestedShoppingMinutes ? ["This trip no longer has enough shopping time.", ...option.warnings] : option.warnings;
 
   return (
-    <div className={warningText.length > 0 ? "timetable-row has-warning" : "timetable-row"} role="row">
-      <span role="cell">
+    <section className={warningText.length > 0 ? "selected-trip has-warning" : "selected-trip"} aria-label="Selected trip combination">
+      <div>
+        <small>Leave</small>
         <strong>{formatClock(option.outbound.board.time)}</strong>
-        <small>{formatDuration(option.outbound.durationMinutes)}</small>
-      </span>
-      <span role="cell">{formatClock(option.outbound.alight.time)}</span>
-      <span role="cell">
+        <span>{formatDuration(option.outbound.durationMinutes)}</span>
+      </div>
+      <div>
+        <small>Arrive</small>
+        <span>{formatClock(option.outbound.alight.time)}</span>
+      </div>
+      <div>
+        <small>Shop</small>
         <strong>{formatDuration(option.shoppingMinutes)}</strong>
-        <small>{option.extraMinutes} min buffer</small>
-      </span>
-      <span role="cell">{formatClock(option.inbound.board.time)}</span>
-      <span role="cell">{formatClock(option.inbound.alight.time)}</span>
-      <span role="cell" className="route-cell">
+        <span>{option.extraMinutes} min buffer</span>
+      </div>
+      <div>
+        <small>Return</small>
+        <span>{formatClock(option.inbound.board.time)}</span>
+      </div>
+      <div>
+        <small>Home</small>
+        <span>{formatClock(option.inbound.alight.time)}</span>
+      </div>
+      <div className="selected-trip-route">
         <span>
           <BusFront size={15} /> {option.outbound.board.routeName}
         </span>
         <span className={hasLiveData ? "source-pill live" : "source-pill"}>{hasLiveData ? "Live" : "Schedule"}</span>
-      </span>
+      </div>
       {warningText.length > 0 ? (
-        <span className="row-warning" role="cell">
+        <p className="row-warning">
           <AlertTriangle size={15} /> {warningText.join(" ")}
-        </span>
+        </p>
       ) : null}
-    </div>
+    </section>
   );
+}
+
+function LegPicker({
+  title,
+  legs,
+  selectedKey,
+  onSelect,
+}: {
+  title: string;
+  legs: TripOption["outbound"][];
+  selectedKey: string;
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <section className="leg-picker">
+      <h2>{title}</h2>
+      <div className="leg-scroll">
+        {legs.map((leg) => {
+          const key = legKey(leg);
+          return (
+            <button className={key === selectedKey ? "leg-option selected" : "leg-option"} key={key} type="button" onClick={() => onSelect(key)}>
+              <span className="leg-time-row">
+                <strong>{formatClock(leg.board.time)}</strong>
+                <span aria-hidden="true">→</span>
+                <span>{formatClock(leg.alight.time)}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function uniqueLegs(options: TripOption[], side: "outbound" | "inbound"): TripOption["outbound"][] {
+  const seen = new Set<string>();
+  return options.flatMap((option) => {
+    const leg = option[side];
+    const key = legKey(leg);
+    if (seen.has(key)) {
+      return [];
+    }
+
+    seen.add(key);
+    return [leg];
+  });
+}
+
+function legKey(leg: TripOption["outbound"]): string {
+  return `${leg.board.tripId}:${leg.board.routeId}:${leg.board.time}:${leg.alight.time}`;
+}
+
+function buildSelectedTripOption(outbound: LegOption, inbound: LegOption, requestedShoppingMinutes: number): TripOption {
+  const shoppingMinutes = minutesBetween(outbound.alight.time, inbound.board.time);
+  const extraMinutes = shoppingMinutes - requestedShoppingMinutes;
+  const warnings: string[] = [];
+
+  if (shoppingMinutes < 0) {
+    warnings.push("The return trip leaves before this supermarket arrival.");
+  } else if (shoppingMinutes < requestedShoppingMinutes) {
+    warnings.push(`Shopping time dropped to ${shoppingMinutes} minutes.`);
+  } else if (extraMinutes <= 10) {
+    warnings.push(`Only ${extraMinutes} minutes of buffer after shopping.`);
+  }
+
+  return {
+    id: `${legKey(outbound)}-${legKey(inbound)}`,
+    outbound,
+    inbound,
+    shoppingMinutes,
+    extraMinutes,
+    warnings,
+  };
 }
 
 function WarningBanner({ text }: { text: string }) {
