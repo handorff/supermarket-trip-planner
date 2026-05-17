@@ -88,6 +88,31 @@ describe("MBTA client", () => {
     expect(events[0].scheduleTime).toBe("2026-05-16T14:00:00-04:00");
   });
 
+  it("drops schedule and prediction events that depart in the past", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            eventResource("past-schedule", "schedule", "past-trip", "2026-05-16T13:59:00-04:00"),
+            eventResource("future-schedule", "schedule", "future-trip", "2026-05-16T14:01:00-04:00"),
+          ],
+          included: includedResources(["past-trip", "future-trip"]),
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [eventResource("past-prediction", "prediction", "past-prediction-trip", "2026-05-16T13:58:00-04:00")],
+          included: includedResources(["past-prediction-trip"]),
+        }),
+      } as Response);
+
+    const events = await fetchStopEvents({ stopId: "home", now: new Date("2026-05-16T14:00:00-04:00") });
+
+    expect(events.map((event) => event.tripId)).toEqual(["future-trip"]);
+  });
+
   it("fetches bus route names serving a stop", async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
@@ -103,3 +128,27 @@ describe("MBTA client", () => {
     expect(vi.mocked(fetch).mock.calls[0][0]).toContain("filter%5Bstop%5D=stop-a");
   });
 });
+
+function eventResource(id: string, type: "schedule" | "prediction", tripId: string, time: string) {
+  return {
+    id,
+    type,
+    attributes: {
+      departure_time: time,
+      stop_sequence: 4,
+      direction_id: 0,
+    },
+    relationships: {
+      stop: { data: { id: "home", type: "stop" } },
+      route: { data: { id: "77", type: "route" } },
+      trip: { data: { id: tripId, type: "trip" } },
+    },
+  };
+}
+
+function includedResources(tripIds: string[]) {
+  return [
+    { id: "77", type: "route", attributes: { short_name: "77" } },
+    ...tripIds.map((tripId) => ({ id: tripId, type: "trip", attributes: { headsign: "Harvard" } })),
+  ];
+}

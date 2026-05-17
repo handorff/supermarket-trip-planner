@@ -1,6 +1,5 @@
 import type { DepartureEvent, JsonApiResource, JsonApiResponse, StopSearchResult, TimeSource } from "./types";
 import { normalizeRouteList } from "./routes";
-import { addMinutes } from "./time";
 
 const MBTA_BASE_URL = "https://api-v3.mbta.com";
 const BUS_ROUTE_TYPE = "3";
@@ -82,11 +81,14 @@ export async function searchStops(query: string, apiKey?: string): Promise<StopS
 
 export async function fetchStopEvents({ stopId, apiKey, now = new Date() }: StopEventsOptions): Promise<DepartureEvent[]> {
   const [schedules, predictions] = await Promise.all([
-    fetchSchedules(stopId, apiKey, now),
+    fetchSchedules(stopId, apiKey),
     fetchPredictions(stopId, apiKey),
   ]);
 
-  return mergeEvents(schedules, predictions).sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+  const cutoff = now.getTime();
+  return mergeEvents(schedules, predictions)
+    .filter((event) => new Date(event.time).getTime() >= cutoff)
+    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 }
 
 export async function fetchRoutesServingStop(stopId: string, apiKey?: string): Promise<string[]> {
@@ -111,7 +113,7 @@ export async function fetchRoutesServingStop(stopId: string, apiKey?: string): P
   return routeIds;
 }
 
-async function fetchSchedules(stopId: string, apiKey: string | undefined, now: Date): Promise<DepartureEvent[]> {
+async function fetchSchedules(stopId: string, apiKey: string | undefined): Promise<DepartureEvent[]> {
   const json = await fetchJson(
     "/schedules",
     {
@@ -126,8 +128,7 @@ async function fetchSchedules(stopId: string, apiKey: string | undefined, now: D
     apiKey,
   );
 
-  const cutoff = addMinutes(now, -10).getTime();
-  return parseEvents(json, "schedule").filter((event) => new Date(event.time).getTime() >= cutoff);
+  return parseEvents(json, "schedule");
 }
 
 async function fetchPredictions(stopId: string, apiKey?: string): Promise<DepartureEvent[]> {
