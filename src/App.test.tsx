@@ -156,6 +156,18 @@ describe("App", () => {
     expect(screen.getAllByText(laterOutboundBoardTime).length).toBeGreaterThan(0);
   });
 
+  it("limits default return trips to the first return that works for the latest visible outbound", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-16T14:00:00-04:00"));
+    seedStorage();
+    mockMultipleTripFetches();
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: legTimeName(formatClock("2026-05-16T15:20:00-04:00"), formatClock("2026-05-16T15:40:00-04:00")) })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: legTimeName(formatClock("2026-05-16T18:20:00-04:00"), formatClock("2026-05-16T18:40:00-04:00")) })).not.toBeInTheDocument();
+  });
+
   it("keeps outbound and return picks independent", async () => {
     const user = userEvent.setup();
     vi.useFakeTimers({ toFake: ["Date"] });

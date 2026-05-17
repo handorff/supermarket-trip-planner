@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { AlertTriangle, Clock, Download, KeyRound, MapPin, Plus, RefreshCcw, Save, Search, Settings2, Trash2, Upload, Wifi } from "lucide-react";
 import { fetchRoutesServingStop, fetchStopEvents, searchStops } from "./lib/mbta";
-import { MAX_SHOPPING_BUFFER_MINUTES, pairAllTrips } from "./lib/planner";
+import { buildLegs, MAX_SHOPPING_BUFFER_MINUTES, pairTripOptions } from "./lib/planner";
 import { formatRouteList, intersectRouteLists, routeListsMatch } from "./lib/routes";
 import { defaultSettings, loadAppData, makeId, parseImportedAppData, saveAppData } from "./lib/storage";
-import { formatClock, formatDuration, minutesBetween } from "./lib/time";
+import { addMinutes, formatClock, formatDuration, minutesBetween } from "./lib/time";
 import type { AppData, HomeStopPair, LegOption, StopRef, StopSearchResult, StoreStopPair, Supermarket, TripOption } from "./lib/types";
 
 type StopField = "homeOutbound" | "homeReturn" | "storeArrival" | "storeDeparture";
@@ -30,6 +30,8 @@ export function App() {
   const [selectedMarketId, setSelectedMarketId] = useState("");
   const [shoppingMinutes, setShoppingMinutes] = useState(data.settings.defaultShoppingMinutes);
   const [options, setOptions] = useState<TripOption[]>([]);
+  const [outboundLegOptions, setOutboundLegOptions] = useState<LegOption[]>([]);
+  const [inboundLegOptions, setInboundLegOptions] = useState<LegOption[]>([]);
   const [isLoadingTrips, setIsLoadingTrips] = useState(false);
   const [tripError, setTripError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -83,6 +85,8 @@ export function App() {
   async function loadTrips() {
     if (!selectedHome || !selectedStorePair) {
       setOptions([]);
+      setOutboundLegOptions([]);
+      setInboundLegOptions([]);
       return;
     }
 
@@ -96,7 +100,11 @@ export function App() {
         fetchStopEvents({ stopId: selectedHome.returnStop.id, apiKey: data.settings.apiKey }),
       ]);
 
-      setOptions(pairAllTrips({ shoppingMinutes }, homeOutbound, storeArrival, storeDeparture, homeReturn));
+      const outboundLegs = buildLegs(homeOutbound, storeArrival);
+      const inboundLegs = buildLegs(storeDeparture, homeReturn);
+      setOutboundLegOptions(outboundLegs);
+      setInboundLegOptions(inboundLegs);
+      setOptions(pairTripOptions(outboundLegs, inboundLegs, shoppingMinutes));
       setLastUpdated(new Date());
     } catch (error) {
       setTripError(error instanceof Error ? error.message : "Could not load MBTA data.");
@@ -191,6 +199,8 @@ export function App() {
       setSelectedMarketId(imported.supermarkets[0]?.id ?? "");
       setShoppingMinutes(imported.settings.defaultShoppingMinutes);
       setOptions([]);
+      setOutboundLegOptions([]);
+      setInboundLegOptions([]);
       setTripError("");
       setLastUpdated(null);
       setStopDrafts(emptyStopDrafts);
@@ -270,11 +280,15 @@ export function App() {
 
           {tripError ? <WarningBanner text={tripError} /> : null}
           {isLoadingTrips ? <p className="muted">Loading MBTA schedules and predictions...</p> : null}
-          {!isLoadingTrips && canPlan && options.length === 0 ? <EmptyState text="No single-bus round trips currently leave enough shopping time." /> : null}
+          {!isLoadingTrips && canPlan && (outboundLegOptions.length === 0 || inboundLegOptions.length === 0) ? (
+            <EmptyState text="No single-bus departures are currently available for this stop pairing." />
+          ) : null}
 
-          {options.length > 0 ? (
+          {outboundLegOptions.length > 0 && inboundLegOptions.length > 0 ? (
             <TripTimetable
               options={options}
+              outboundLegs={outboundLegOptions}
+              inboundLegs={inboundLegOptions}
               requestedShoppingMinutes={shoppingMinutes}
               showAllTrips={showAllTrips}
               onShowMore={() => setShowAllTrips(true)}
@@ -552,43 +566,64 @@ function StopPicker({ label, selected, apiKey, onSelect }: { label: string; sele
 
 function TripTimetable({
   options,
+  outboundLegs,
+  inboundLegs,
   requestedShoppingMinutes,
   showAllTrips,
   onShowMore,
 }: {
   options: TripOption[];
+  outboundLegs: LegOption[];
+  inboundLegs: LegOption[];
   requestedShoppingMinutes: number;
   showAllTrips: boolean;
   onShowMore: () => void;
 }) {
   const cutoff = Date.now() + DEFAULT_DEPARTURE_WINDOW_MINUTES * 60000;
-  const visibleOptions = showAllTrips
-    ? options
-    : options.filter((option) => new Date(option.outbound.board.time).getTime() <= cutoff);
-  const hiddenCount = uniqueLegs(options, "outbound").length - uniqueLegs(visibleOptions, "outbound").length;
+  const visibleOutboundLegs = showAllTrips
+    ? outboundLegs
+    : outboundLegs.filter((leg) => new Date(leg.board.time).getTime() <= cutoff);
+  const earliestVisibleArrival = visibleOutboundLegs[0]?.alight.time;
+  const latestVisibleArrival = visibleOutboundLegs.at(-1)?.alight.time;
+  const inboundDepartureLimit = latestVisibleArrival
+    ? inboundLegs.find((leg) => new Date(leg.board.time).getTime() >= addMinutes(new Date(latestVisibleArrival), requestedShoppingMinutes).getTime())
+        ?.board.time
+    : undefined;
+  const visibleInboundLegs = inboundLegs
+    .filter((leg) => {
+      const departureTime = new Date(leg.board.time).getTime();
+      return (
+        (!earliestVisibleArrival || departureTime >= new Date(earliestVisibleArrival).getTime()) &&
+        (!inboundDepartureLimit || departureTime <= new Date(inboundDepartureLimit).getTime())
+      );
+    })
+    .sort(compareLegDeparture);
+  const visibleOutboundKeys = new Set(visibleOutboundLegs.map(legKey));
+  const visibleOptions = options.filter((option) => visibleOutboundKeys.has(legKey(option.outbound)));
+  const hiddenCount = outboundLegs.length - visibleOutboundLegs.length;
   const [selectedOutboundKey, setSelectedOutboundKey] = useState("");
   const [selectedInboundKey, setSelectedInboundKey] = useState("");
-  const outboundLegs = uniqueLegs(visibleOptions, "outbound");
-  const inboundLegs = uniqueLegs(visibleOptions, "inbound").sort(compareLegDeparture);
   const defaultOption = visibleOptions.find((option) => isPracticalOption(option, requestedShoppingMinutes)) ?? visibleOptions[0];
+  const defaultOutbound = defaultOption?.outbound ?? visibleOutboundLegs[0];
+  const defaultInbound = defaultOption?.inbound ?? visibleInboundLegs[0];
 
   useEffect(() => {
-    if (visibleOptions.length === 0) {
+    if (visibleOutboundLegs.length === 0 || visibleInboundLegs.length === 0) {
       setSelectedOutboundKey("");
       setSelectedInboundKey("");
       return;
     }
 
-    const hasSelectedOutbound = outboundLegs.some((leg) => legKey(leg) === selectedOutboundKey);
-    const hasSelectedInbound = inboundLegs.some((leg) => legKey(leg) === selectedInboundKey);
+    const hasSelectedOutbound = visibleOutboundLegs.some((leg) => legKey(leg) === selectedOutboundKey);
+    const hasSelectedInbound = visibleInboundLegs.some((leg) => legKey(leg) === selectedInboundKey);
     if (!hasSelectedOutbound || !hasSelectedInbound) {
-      setSelectedOutboundKey(legKey(defaultOption.outbound));
-      setSelectedInboundKey(legKey(defaultOption.inbound));
+      setSelectedOutboundKey(legKey(defaultOutbound));
+      setSelectedInboundKey(legKey(defaultInbound));
     }
-  }, [visibleOptions, outboundLegs, inboundLegs, defaultOption, selectedOutboundKey, selectedInboundKey]);
+  }, [visibleOutboundLegs, visibleInboundLegs, defaultOutbound, defaultInbound, selectedOutboundKey, selectedInboundKey]);
 
-  const selectedOutbound = outboundLegs.find((leg) => legKey(leg) === selectedOutboundKey) ?? defaultOption?.outbound;
-  const selectedInbound = inboundLegs.find((leg) => legKey(leg) === selectedInboundKey) ?? defaultOption?.inbound;
+  const selectedOutbound = visibleOutboundLegs.find((leg) => legKey(leg) === selectedOutboundKey) ?? defaultOutbound;
+  const selectedInbound = visibleInboundLegs.find((leg) => legKey(leg) === selectedInboundKey) ?? defaultInbound;
   const selectedOption = selectedOutbound && selectedInbound ? buildSelectedTripOption(selectedOutbound, selectedInbound, requestedShoppingMinutes) : undefined;
 
   function chooseOutbound(key: string) {
@@ -601,19 +636,19 @@ function TripTimetable({
 
   return (
     <>
-      {visibleOptions.length > 0 && selectedOption ? (
+      {visibleOutboundLegs.length > 0 && visibleInboundLegs.length > 0 && selectedOption ? (
         <div className="trip-picker" aria-live="polite">
           <SelectedTrip option={selectedOption} requestedShoppingMinutes={requestedShoppingMinutes} />
           <div className="leg-picker-grid">
             <LegPicker
               title="To supermarket"
-              legs={outboundLegs}
+              legs={visibleOutboundLegs}
               selectedKey={legKey(selectedOption.outbound)}
               onSelect={chooseOutbound}
             />
             <LegPicker
               title="Back home"
-              legs={inboundLegs}
+              legs={visibleInboundLegs}
               selectedKey={legKey(selectedOption.inbound)}
               onSelect={chooseInbound}
             />
