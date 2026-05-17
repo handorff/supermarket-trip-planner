@@ -67,6 +67,22 @@ describe("App", () => {
     expect(window.localStorage.getItem("supermarket-trip-planner:v1")).toContain("secret");
   });
 
+  it("exports the saved setup data as JSON", async () => {
+    seedStorage();
+
+    render(<App />);
+
+    await screen.findByText("Market");
+    await userEvent.click(screen.getByRole("button", { name: /open setup/i }));
+    const exportLink = screen.getByRole("link", { name: /export setup/i });
+    const href = exportLink.getAttribute("href") ?? "";
+    const exported = JSON.parse(decodeURIComponent(href.replace("data:application/json;charset=utf-8,", "")));
+
+    expect(exportLink).toHaveAttribute("download", "Supermarket Trip Planner Setup.json");
+    expect(exported.homeStopPairs).toHaveLength(1);
+    expect(exported.supermarkets[0].name).toBe("Market");
+  });
+
   it("imports setup data from a JSON file", async () => {
     const user = userEvent.setup();
     render(<App />);

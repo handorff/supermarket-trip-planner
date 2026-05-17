@@ -19,7 +19,8 @@ body {
 
 button,
 input,
-select {
+select,
+a {
   font: inherit;
 }
 
@@ -206,6 +207,7 @@ select {
 .secondary-button {
   background: #e7efe8;
   color: #17423b;
+  text-decoration: none;
 }
 
 .icon-button {

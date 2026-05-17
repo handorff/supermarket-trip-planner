@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { AlertTriangle, Clock, Download, KeyRound, MapPin, Plus, RefreshCcw, Save, Search, Settings2, Trash2, Upload, Wifi } from "lucide-react";
 import { fetchRoutesServingStop, fetchStopEvents, searchStops } from "./lib/mbta";
@@ -43,6 +43,8 @@ export function App() {
   const [showAllTrips, setShowAllTrips] = useState(false);
   const [setupTransferStatus, setSetupTransferStatus] = useState("");
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const setupExportText = useMemo(() => `${JSON.stringify(data, null, 2)}\n`, [data]);
+  const setupExportHref = useMemo(() => `data:application/json;charset=utf-8,${encodeURIComponent(setupExportText)}`, [setupExportText]);
 
   useEffect(() => saveAppData(data), [data]);
 
@@ -176,17 +178,6 @@ export function App() {
 
   function deleteMarket(id: string) {
     updateData({ ...data, supermarkets: data.supermarkets.filter((market) => market.id !== id) });
-  }
-
-  function exportSetup() {
-    const blob = new Blob([`${JSON.stringify(data, null, 2)}\n`], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "supermarket-trip-planner-setup.json";
-    link.click();
-    URL.revokeObjectURL(url);
-    setSetupTransferStatus("Setup exported.");
   }
 
   async function importSetup(file: File | undefined) {
@@ -336,9 +327,9 @@ export function App() {
               </label>
             </div>
             <div className="setup-transfer">
-              <button className="secondary-button" type="button" onClick={exportSetup}>
+              <a className="secondary-button" href={setupExportHref} download="Supermarket Trip Planner Setup.json" onClick={() => setSetupTransferStatus("Setup exported.")}>
                 <Download size={17} /> Export setup
-              </button>
+              </a>
               <label className="secondary-button file-button">
                 <Upload size={17} /> Import setup
                 <input
