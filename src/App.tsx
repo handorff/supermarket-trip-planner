@@ -94,10 +94,10 @@ export function App() {
     setTripError("");
     try {
       const [homeOutbound, storeArrival, storeDeparture, homeReturn] = await Promise.all([
-        fetchStopEvents({ stopId: selectedHome.outboundStop.id, apiKey: data.settings.apiKey }),
-        fetchStopEvents({ stopId: selectedStorePair.arrivalStop.id, apiKey: data.settings.apiKey }),
-        fetchStopEvents({ stopId: selectedStorePair.departureStop.id, apiKey: data.settings.apiKey }),
-        fetchStopEvents({ stopId: selectedHome.returnStop.id, apiKey: data.settings.apiKey }),
+        fetchStopEvents({ stopId: selectedHome.outboundStop.id, routeIds: selectedStorePair.routeIds, apiKey: data.settings.apiKey }),
+        fetchStopEvents({ stopId: selectedStorePair.arrivalStop.id, routeIds: selectedStorePair.routeIds, apiKey: data.settings.apiKey }),
+        fetchStopEvents({ stopId: selectedStorePair.departureStop.id, routeIds: selectedStorePair.routeIds, apiKey: data.settings.apiKey }),
+        fetchStopEvents({ stopId: selectedHome.returnStop.id, routeIds: selectedStorePair.routeIds, apiKey: data.settings.apiKey }),
       ]);
 
       const outboundLegs = buildLegs(homeOutbound, storeArrival);

@@ -10,6 +10,7 @@ interface StopEventsOptions {
   stopId: string;
   apiKey?: string;
   now?: Date;
+  routeIds?: string[];
 }
 
 export class MbtaError extends Error {
@@ -79,10 +80,10 @@ export async function searchStops(query: string, apiKey?: string): Promise<StopS
     .slice(0, 12);
 }
 
-export async function fetchStopEvents({ stopId, apiKey, now = new Date() }: StopEventsOptions): Promise<DepartureEvent[]> {
+export async function fetchStopEvents({ stopId, apiKey, now = new Date(), routeIds = [] }: StopEventsOptions): Promise<DepartureEvent[]> {
   const [schedules, predictions] = await Promise.all([
-    fetchSchedules(stopId, apiKey),
-    fetchPredictions(stopId, apiKey),
+    fetchSchedules(stopId, routeIds, apiKey),
+    fetchPredictions(stopId, routeIds, apiKey),
   ]);
 
   const cutoff = now.getTime();
@@ -113,12 +114,13 @@ export async function fetchRoutesServingStop(stopId: string, apiKey?: string): P
   return routeIds;
 }
 
-async function fetchSchedules(stopId: string, apiKey: string | undefined): Promise<DepartureEvent[]> {
+async function fetchSchedules(stopId: string, routeIds: string[], apiKey: string | undefined): Promise<DepartureEvent[]> {
   const json = await fetchJson(
     "/schedules",
     {
       "filter[stop]": stopId,
       "filter[route_type]": BUS_ROUTE_TYPE,
+      "filter[route]": routeIds.join(","),
       include: "route,trip",
       "page[limit]": 80,
       "filter[min_time]": "0:00",
@@ -131,12 +133,13 @@ async function fetchSchedules(stopId: string, apiKey: string | undefined): Promi
   return parseEvents(json, "schedule");
 }
 
-async function fetchPredictions(stopId: string, apiKey?: string): Promise<DepartureEvent[]> {
+async function fetchPredictions(stopId: string, routeIds: string[], apiKey?: string): Promise<DepartureEvent[]> {
   const json = await fetchJson(
     "/predictions",
     {
       "filter[stop]": stopId,
       "filter[route_type]": BUS_ROUTE_TYPE,
+      "filter[route]": routeIds.join(","),
       include: "route,trip,schedule,alerts",
       "page[limit]": 80,
       sort: "departure_time",

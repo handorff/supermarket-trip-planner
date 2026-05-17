@@ -113,6 +113,29 @@ describe("MBTA client", () => {
     expect(events.map((event) => event.tripId)).toEqual(["future-trip"]);
   });
 
+  it("filters stop events by route when route ids are provided", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [eventResource("future-schedule", "schedule", "future-trip", "2026-05-16T14:01:00-04:00")],
+          included: includedResources(["future-trip"]),
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [],
+          included: [],
+        }),
+      } as Response);
+
+    await fetchStopEvents({ stopId: "home", routeIds: ["87"], now: new Date("2026-05-16T14:00:00-04:00") });
+
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain("filter%5Broute%5D=87");
+    expect(vi.mocked(fetch).mock.calls[1][0]).toContain("filter%5Broute%5D=87");
+  });
+
   it("fetches bus route names serving a stop", async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
