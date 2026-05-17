@@ -41,7 +41,7 @@ describe("buildLegs", () => {
 });
 
 describe("pairTripOptions", () => {
-  it("keeps the first practical return for each outbound trip and sorts by outbound time", () => {
+  it("keeps every return after each outbound arrival and sorts by outbound time", () => {
     const outboundLegs = [
       {
         board: event({ tripId: "out-2", time: "2026-05-16T14:10:00-04:00" }),
@@ -56,6 +56,11 @@ describe("pairTripOptions", () => {
     ];
     const inboundLegs = [
       {
+        board: event({ tripId: "in-early", time: "2026-05-16T14:50:00-04:00", directionId: 1 }),
+        alight: event({ tripId: "in-early", stopSequence: 20, time: "2026-05-16T15:10:00-04:00", directionId: 1 }),
+        durationMinutes: 20,
+      },
+      {
         board: event({ tripId: "in-1", time: "2026-05-16T15:20:00-04:00", directionId: 1 }),
         alight: event({ tripId: "in-1", stopSequence: 20, time: "2026-05-16T15:40:00-04:00", directionId: 1 }),
         durationMinutes: 20,
@@ -69,13 +74,12 @@ describe("pairTripOptions", () => {
 
     const options = pairTripOptions(outboundLegs, inboundLegs, 45);
 
-    expect(options).toHaveLength(2);
+    expect(options).toHaveLength(6);
     expect(options[0].outbound.board.tripId).toBe("out-1");
-    expect(options[0].shoppingMinutes).toBe(60);
-    expect(options[0].inbound.board.tripId).toBe("in-1");
+    expect(options.map((option) => option.inbound.board.tripId)).toContain("in-early");
   });
 
-  it("rejects options without enough shopping time", () => {
+  it("keeps options without enough shopping time so the return picker can show them", () => {
     const outboundLegs = [
       {
         board: event({ time: "2026-05-16T14:00:00-04:00" }),
@@ -91,10 +95,14 @@ describe("pairTripOptions", () => {
       },
     ];
 
-    expect(pairTripOptions(outboundLegs, inboundLegs, 45)).toHaveLength(0);
+    const options = pairTripOptions(outboundLegs, inboundLegs, 45);
+
+    expect(options).toHaveLength(1);
+    expect(options[0].shoppingMinutes).toBe(30);
+    expect(options[0].warnings).toContain("Shopping time dropped to 30 minutes.");
   });
 
-  it("rejects options with impractically long shopping gaps", () => {
+  it("keeps options with long shopping gaps so all available returns are visible", () => {
     const outboundLegs = [
       {
         board: event({ time: "2026-05-16T14:00:00-04:00" }),
@@ -114,7 +122,10 @@ describe("pairTripOptions", () => {
       },
     ];
 
-    expect(pairTripOptions(outboundLegs, inboundLegs, 45)).toHaveLength(0);
+    const options = pairTripOptions(outboundLegs, inboundLegs, 45);
+
+    expect(options).toHaveLength(1);
+    expect(options[0].shoppingMinutes).toBe(151);
   });
 });
 

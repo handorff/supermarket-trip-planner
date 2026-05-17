@@ -38,28 +38,24 @@ export function buildLegs(boardEvents: DepartureEvent[], alightEvents: Departure
 export function pairTripOptions(outboundLegs: LegOption[], inboundLegs: LegOption[], shoppingMinutes: number): TripOption[] {
   const inboundByDeparture = [...inboundLegs].sort((a, b) => new Date(a.board.time).getTime() - new Date(b.board.time).getTime());
   const options = outboundLegs.flatMap((outbound) => {
-    const inbound = inboundByDeparture.find((candidate) => {
+    const availableReturns = inboundByDeparture.filter((candidate) => {
       const availableShopping = minutesBetween(outbound.alight.time, candidate.board.time);
-      return availableShopping >= shoppingMinutes && availableShopping - shoppingMinutes <= MAX_SHOPPING_BUFFER_MINUTES;
+      return availableShopping >= 0;
     });
 
-    if (!inbound) {
-      return [];
-    }
-
+    return availableReturns.map((inbound) => {
       const availableShopping = minutesBetween(outbound.alight.time, inbound.board.time);
       const warnings = buildWarnings(outbound, inbound, shoppingMinutes, availableShopping);
 
-      return [
-        {
-          id: `${outbound.board.tripId}-${inbound.board.tripId}`,
-          outbound,
-          inbound,
-          shoppingMinutes: availableShopping,
-          extraMinutes: availableShopping - shoppingMinutes,
-          warnings,
-        },
-      ];
+      return {
+        id: `${outbound.board.tripId}-${inbound.board.tripId}`,
+        outbound,
+        inbound,
+        shoppingMinutes: availableShopping,
+        extraMinutes: availableShopping - shoppingMinutes,
+        warnings,
+      };
+    });
   });
 
   return options.sort((a, b) => {

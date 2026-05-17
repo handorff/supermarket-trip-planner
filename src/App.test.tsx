@@ -53,7 +53,8 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByText("50 min")).toBeInTheDocument());
-    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Live prediction").length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText("Schedule").length).toBeGreaterThan(0);
     expect(screen.getByText(/Only 5 minutes of buffer after shopping/i)).toBeInTheDocument();
   });
 
@@ -64,6 +65,49 @@ describe("App", () => {
     await user.type(screen.getByLabelText("Optional MBTA API key"), "secret");
 
     expect(window.localStorage.getItem("supermarket-trip-planner:v1")).toContain("secret");
+  });
+
+  it("imports setup data from a JSON file", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const file = new File(
+      [
+        JSON.stringify({
+          settings: { defaultShoppingMinutes: 55, apiKey: "imported-key", refreshIntervalSeconds: 120 },
+          homeStopPairs: [
+            {
+              id: "imported-home",
+              name: "Imported home",
+              routeIds: ["87"],
+              outboundStop: { id: "home-out", name: "Home Outbound" },
+              returnStop: { id: "home-back", name: "Home Return" },
+            },
+          ],
+          supermarkets: [
+            {
+              id: "imported-market",
+              name: "Imported Market",
+              stopPair: {
+                id: "imported-store",
+                label: "Imported store",
+                routeIds: ["87"],
+                arrivalStop: { id: "store-in", name: "Store Arrival" },
+                departureStop: { id: "store-out", name: "Store Departure" },
+              },
+            },
+          ],
+        }),
+      ],
+      "setup.json",
+      { type: "application/json" },
+    );
+
+    await user.upload(screen.getByLabelText("Import setup JSON"), file);
+
+    expect(await screen.findByText("Setup imported.")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("55")).toBeInTheDocument();
+    expect(screen.getByText("Imported Market")).toBeInTheDocument();
+    expect(window.localStorage.getItem("supermarket-trip-planner:v1")).toContain("imported-key");
   });
 
   it("auto-selects the home stop group with matching routes", async () => {
@@ -115,6 +159,19 @@ describe("App", () => {
     const selectedTrip = within(screen.getByLabelText("Selected trip combination"));
     expect(selectedTrip.getByText(laterOutboundBoardTime)).toBeInTheDocument();
     expect(selectedTrip.getByText(firstReturnBoardTime)).toBeInTheDocument();
+  });
+
+  it("shows return trips after the first arrival even when they leave before requested shopping time", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-16T14:00:00-04:00"));
+    seedStorage();
+    mockMultipleTripFetches();
+    const earlyReturnBoardTime = formatClock("2026-05-16T14:45:00-04:00");
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: legTimeName(earlyReturnBoardTime, formatClock("2026-05-16T15:05:00-04:00")) })).toBeInTheDocument());
+    expect(within(screen.getByLabelText("Selected trip combination")).getByText(formatClock("2026-05-16T15:20:00-04:00"))).toBeInTheDocument();
   });
 });
 
@@ -271,19 +328,21 @@ function mockMultipleTripFetches() {
     if (stop === "store-out") {
       return okJson({
         data: [
+          eventResource("schedule-store-out-early", "schedule", "store-out", "in-early", 6, "2026-05-16T14:45:00-04:00", 1),
           eventResource("schedule-store-out-1", "schedule", "store-out", "in-1", 6, "2026-05-16T15:20:00-04:00", 1),
           eventResource("schedule-store-out-2", "schedule", "store-out", "in-2", 6, "2026-05-16T18:20:00-04:00", 1),
         ],
-        included: includedTrips(["in-1", "in-2"]),
+        included: includedTrips(["in-early", "in-1", "in-2"]),
       });
     }
     if (stop === "home-back") {
       return okJson({
         data: [
+          eventResource("schedule-home-back-early", "schedule", "home-back", "in-early", 12, "2026-05-16T15:05:00-04:00", 1),
           eventResource("schedule-home-back-1", "schedule", "home-back", "in-1", 12, "2026-05-16T15:40:00-04:00", 1),
           eventResource("schedule-home-back-2", "schedule", "home-back", "in-2", 12, "2026-05-16T18:40:00-04:00", 1),
         ],
-        included: includedTrips(["in-1", "in-2"]),
+        included: includedTrips(["in-early", "in-1", "in-2"]),
       });
     }
     return emptyResponse();

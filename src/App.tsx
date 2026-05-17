@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { AlertTriangle, BusFront, KeyRound, MapPin, Plus, RefreshCcw, Save, Search, Settings2, Trash2 } from "lucide-react";
+import { AlertTriangle, Clock, Download, KeyRound, MapPin, Plus, RefreshCcw, Save, Search, Settings2, Trash2, Upload, Wifi } from "lucide-react";
 import { fetchRoutesServingStop, fetchStopEvents, searchStops } from "./lib/mbta";
-import { pairAllTrips } from "./lib/planner";
+import { MAX_SHOPPING_BUFFER_MINUTES, pairAllTrips } from "./lib/planner";
 import { formatRouteList, intersectRouteLists, routeListsMatch } from "./lib/routes";
-import { defaultSettings, loadAppData, makeId, saveAppData } from "./lib/storage";
+import { defaultSettings, loadAppData, makeId, parseImportedAppData, saveAppData } from "./lib/storage";
 import { formatClock, formatDuration, minutesBetween } from "./lib/time";
 import type { AppData, HomeStopPair, LegOption, StopRef, StopSearchResult, StoreStopPair, Supermarket, TripOption } from "./lib/types";
 
@@ -41,6 +41,8 @@ export function App() {
   const [homeRouteStatus, setHomeRouteStatus] = useState("");
   const [storeRouteStatus, setStoreRouteStatus] = useState("");
   const [showAllTrips, setShowAllTrips] = useState(false);
+  const [setupTransferStatus, setSetupTransferStatus] = useState("");
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => saveAppData(data), [data]);
 
@@ -176,6 +178,43 @@ export function App() {
     updateData({ ...data, supermarkets: data.supermarkets.filter((market) => market.id !== id) });
   }
 
+  function exportSetup() {
+    const blob = new Blob([`${JSON.stringify(data, null, 2)}\n`], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "supermarket-trip-planner-setup.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    setSetupTransferStatus("Setup exported.");
+  }
+
+  async function importSetup(file: File | undefined) {
+    if (!file) {
+      return;
+    }
+
+    try {
+      const imported = parseImportedAppData(await readFileText(file));
+      updateData(imported);
+      setSelectedMarketId(imported.supermarkets[0]?.id ?? "");
+      setShoppingMinutes(imported.settings.defaultShoppingMinutes);
+      setOptions([]);
+      setTripError("");
+      setLastUpdated(null);
+      setStopDrafts(emptyStopDrafts);
+      setHomeRouteIds([]);
+      setStorePairRouteIds([]);
+      setSetupTransferStatus("Setup imported.");
+    } catch (error) {
+      setSetupTransferStatus(error instanceof Error ? error.message : "Could not import setup JSON.");
+    } finally {
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -296,6 +335,22 @@ export function App() {
                 </div>
               </label>
             </div>
+            <div className="setup-transfer">
+              <button className="secondary-button" type="button" onClick={exportSetup}>
+                <Download size={17} /> Export setup
+              </button>
+              <label className="secondary-button file-button">
+                <Upload size={17} /> Import setup
+                <input
+                  ref={importInputRef}
+                  aria-label="Import setup JSON"
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={(event) => void importSetup(event.target.files?.[0])}
+                />
+              </label>
+            </div>
+            {setupTransferStatus ? <p className="muted setup-transfer-status">{setupTransferStatus}</p> : null}
           </section>
 
           <section className="panel">
@@ -366,6 +421,15 @@ export function App() {
       )}
     </main>
   );
+}
+
+function readFileText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result ?? "")));
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("Could not read setup JSON.")));
+    reader.readAsText(file);
+  });
 }
 
 function hasSavedPlannerInfo(data: AppData): boolean {
@@ -510,11 +574,12 @@ function TripTimetable({
   const visibleOptions = showAllTrips
     ? options
     : options.filter((option) => new Date(option.outbound.board.time).getTime() <= cutoff);
-  const hiddenCount = options.length - visibleOptions.length;
+  const hiddenCount = uniqueLegs(options, "outbound").length - uniqueLegs(visibleOptions, "outbound").length;
   const [selectedOutboundKey, setSelectedOutboundKey] = useState("");
   const [selectedInboundKey, setSelectedInboundKey] = useState("");
   const outboundLegs = uniqueLegs(visibleOptions, "outbound");
-  const inboundLegs = uniqueLegs(visibleOptions, "inbound");
+  const inboundLegs = uniqueLegs(visibleOptions, "inbound").sort(compareLegDeparture);
+  const defaultOption = visibleOptions.find((option) => isPracticalOption(option, requestedShoppingMinutes)) ?? visibleOptions[0];
 
   useEffect(() => {
     if (visibleOptions.length === 0) {
@@ -526,13 +591,13 @@ function TripTimetable({
     const hasSelectedOutbound = outboundLegs.some((leg) => legKey(leg) === selectedOutboundKey);
     const hasSelectedInbound = inboundLegs.some((leg) => legKey(leg) === selectedInboundKey);
     if (!hasSelectedOutbound || !hasSelectedInbound) {
-      setSelectedOutboundKey(legKey(visibleOptions[0].outbound));
-      setSelectedInboundKey(legKey(visibleOptions[0].inbound));
+      setSelectedOutboundKey(legKey(defaultOption.outbound));
+      setSelectedInboundKey(legKey(defaultOption.inbound));
     }
-  }, [visibleOptions, outboundLegs, inboundLegs, selectedOutboundKey, selectedInboundKey]);
+  }, [visibleOptions, outboundLegs, inboundLegs, defaultOption, selectedOutboundKey, selectedInboundKey]);
 
-  const selectedOutbound = outboundLegs.find((leg) => legKey(leg) === selectedOutboundKey) ?? visibleOptions[0]?.outbound;
-  const selectedInbound = inboundLegs.find((leg) => legKey(leg) === selectedInboundKey) ?? visibleOptions[0]?.inbound;
+  const selectedOutbound = outboundLegs.find((leg) => legKey(leg) === selectedOutboundKey) ?? defaultOption?.outbound;
+  const selectedInbound = inboundLegs.find((leg) => legKey(leg) === selectedInboundKey) ?? defaultOption?.inbound;
   const selectedOption = selectedOutbound && selectedInbound ? buildSelectedTripOption(selectedOutbound, selectedInbound, requestedShoppingMinutes) : undefined;
 
   function chooseOutbound(key: string) {
@@ -576,23 +641,17 @@ function TripTimetable({
 }
 
 function SelectedTrip({ option, requestedShoppingMinutes }: { option: TripOption; requestedShoppingMinutes: number }) {
-  const hasLiveData =
-    option.outbound.board.source === "prediction" ||
-    option.outbound.alight.source === "prediction" ||
-    option.inbound.board.source === "prediction" ||
-    option.inbound.alight.source === "prediction";
   const warningText = option.shoppingMinutes < requestedShoppingMinutes ? ["This trip no longer has enough shopping time.", ...option.warnings] : option.warnings;
 
   return (
     <section className={warningText.length > 0 ? "selected-trip has-warning" : "selected-trip"} aria-label="Selected trip combination">
       <div>
         <small>Leave</small>
-        <strong>{formatClock(option.outbound.board.time)}</strong>
-        <span>{formatDuration(option.outbound.durationMinutes)}</span>
+        <TimeWithSource time={option.outbound.board.time} source={option.outbound.board.source} strong />
       </div>
       <div>
         <small>Arrive</small>
-        <span>{formatClock(option.outbound.alight.time)}</span>
+        <TimeWithSource time={option.outbound.alight.time} source={option.outbound.alight.source} />
       </div>
       <div>
         <small>Shop</small>
@@ -601,17 +660,11 @@ function SelectedTrip({ option, requestedShoppingMinutes }: { option: TripOption
       </div>
       <div>
         <small>Return</small>
-        <span>{formatClock(option.inbound.board.time)}</span>
+        <TimeWithSource time={option.inbound.board.time} source={option.inbound.board.source} />
       </div>
       <div>
         <small>Home</small>
-        <span>{formatClock(option.inbound.alight.time)}</span>
-      </div>
-      <div className="selected-trip-route">
-        <span>
-          <BusFront size={15} /> {option.outbound.board.routeName}
-        </span>
-        <span className={hasLiveData ? "source-pill live" : "source-pill"}>{hasLiveData ? "Live" : "Schedule"}</span>
+        <TimeWithSource time={option.inbound.alight.time} source={option.inbound.alight.source} />
       </div>
       {warningText.length > 0 ? (
         <p className="row-warning">
@@ -619,6 +672,21 @@ function SelectedTrip({ option, requestedShoppingMinutes }: { option: TripOption
         </p>
       ) : null}
     </section>
+  );
+}
+
+function TimeWithSource({ time, source, strong = false }: { time: string; source: "prediction" | "schedule"; strong?: boolean }) {
+  const label = source === "prediction" ? "Live prediction" : "Schedule";
+  const Icon = source === "prediction" ? Wifi : Clock;
+  const timeText = formatClock(time);
+
+  return (
+    <span className="time-with-source">
+      {strong ? <strong>{timeText}</strong> : <span>{timeText}</span>}
+      <span className={source === "prediction" ? "time-source live" : "time-source"} aria-label={label} title={label}>
+        <Icon size={14} />
+      </span>
+    </span>
   );
 }
 
@@ -666,6 +734,14 @@ function uniqueLegs(options: TripOption[], side: "outbound" | "inbound"): TripOp
     seen.add(key);
     return [leg];
   });
+}
+
+function compareLegDeparture(left: LegOption, right: LegOption): number {
+  return new Date(left.board.time).getTime() - new Date(right.board.time).getTime();
+}
+
+function isPracticalOption(option: TripOption, requestedShoppingMinutes: number): boolean {
+  return option.shoppingMinutes >= requestedShoppingMinutes && option.extraMinutes <= MAX_SHOPPING_BUFFER_MINUTES;
 }
 
 function legKey(leg: TripOption["outbound"]): string {
