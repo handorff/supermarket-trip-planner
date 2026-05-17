@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { clearMbtaStopCacheForTests } from "./lib/mbta";
+import { formatClock } from "./lib/time";
 
 function okJson(body: unknown): Response {
   return {
@@ -82,15 +83,17 @@ describe("App", () => {
     vi.setSystemTime(new Date("2026-05-16T14:00:00-04:00"));
     seedStorage();
     mockMultipleTripFetches();
+    const firstOutboundBoardTime = formatClock("2026-05-16T14:10:00-04:00");
+    const laterOutboundBoardTime = formatClock("2026-05-16T17:10:00-04:00");
 
     render(<App />);
 
-    await waitFor(() => expect(screen.getAllByText("2:10 PM").length).toBeGreaterThan(0));
-    expect(screen.queryByText("5:10 PM")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText(firstOutboundBoardTime).length).toBeGreaterThan(0));
+    expect(screen.queryByText(laterOutboundBoardTime)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /show 1 later trip/i }));
 
-    expect(screen.getAllByText("5:10 PM").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(laterOutboundBoardTime).length).toBeGreaterThan(0);
   });
 
   it("keeps outbound and return picks independent", async () => {
@@ -99,18 +102,29 @@ describe("App", () => {
     vi.setSystemTime(new Date("2026-05-16T14:00:00-04:00"));
     seedStorage();
     mockMultipleTripFetches();
+    const laterOutboundBoardTime = formatClock("2026-05-16T17:10:00-04:00");
+    const laterOutboundAlightTime = formatClock("2026-05-16T17:30:00-04:00");
+    const firstReturnBoardTime = formatClock("2026-05-16T15:20:00-04:00");
 
     render(<App />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /show 1 later trip/i })).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: /show 1 later trip/i }));
-    await user.click(screen.getByRole("button", { name: /5:10 PM\s*5:30 PM/i }));
+    await user.click(screen.getByRole("button", { name: legTimeName(laterOutboundBoardTime, laterOutboundAlightTime) }));
 
     const selectedTrip = within(screen.getByLabelText("Selected trip combination"));
-    expect(selectedTrip.getByText("5:10 PM")).toBeInTheDocument();
-    expect(selectedTrip.getByText("3:20 PM")).toBeInTheDocument();
+    expect(selectedTrip.getByText(laterOutboundBoardTime)).toBeInTheDocument();
+    expect(selectedTrip.getByText(firstReturnBoardTime)).toBeInTheDocument();
   });
 });
+
+function legTimeName(boardTime: string, alightTime: string): RegExp {
+  return new RegExp(`${escapeRegExp(boardTime)}\\s*${escapeRegExp(alightTime)}`, "i");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function mockSetupFetches() {
   vi.mocked(fetch).mockImplementation(async (input) => {
