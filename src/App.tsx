@@ -262,17 +262,14 @@ export function App() {
             </label>
           </div>
 
-          <div className="sticky-summary">
-            <div>
-              <strong>{canPlan ? `${formatRouteList(selectedHome?.routeIds)} to ${selectedMarket?.name}` : "Setup required"}</strong>
-              <span>
-                {lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "No live data yet"}
-              </span>
-            </div>
-            <button className="secondary-button" type="button" onClick={() => void loadTrips()} disabled={!canPlan || isLoadingTrips}>
-              <RefreshCcw size={17} /> Refresh
-            </button>
-          </div>
+          {outboundLegOptions.length === 0 || inboundLegOptions.length === 0 ? (
+            <PlanSummary
+              title={canPlan ? `${formatRouteList(selectedHome?.routeIds)} to ${selectedMarket?.name}` : "Setup required"}
+              lastUpdated={lastUpdated}
+              onRefresh={() => void loadTrips()}
+              isRefreshDisabled={!canPlan || isLoadingTrips}
+            />
+          ) : null}
 
           {!selectedHome || !selectedStorePair ? (
             <EmptyState text="Add a home stop group with the same inferred route as this supermarket." />
@@ -289,6 +286,10 @@ export function App() {
               options={options}
               outboundLegs={outboundLegOptions}
               inboundLegs={inboundLegOptions}
+              summaryTitle={canPlan ? `${formatRouteList(selectedHome?.routeIds)} to ${selectedMarket?.name}` : "Setup required"}
+              lastUpdated={lastUpdated}
+              onRefresh={() => void loadTrips()}
+              isRefreshDisabled={!canPlan || isLoadingTrips}
               requestedShoppingMinutes={shoppingMinutes}
               showAllTrips={showAllTrips}
               onShowMore={() => setShowAllTrips(true)}
@@ -425,6 +426,30 @@ export function App() {
         </section>
       )}
     </main>
+  );
+}
+
+function PlanSummary({
+  title,
+  lastUpdated,
+  onRefresh,
+  isRefreshDisabled,
+}: {
+  title: string;
+  lastUpdated: Date | null;
+  onRefresh: () => void;
+  isRefreshDisabled: boolean;
+}) {
+  return (
+    <div className="plan-summary">
+      <div>
+        <strong>{title}</strong>
+        <span>{lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "No live data yet"}</span>
+      </div>
+      <button className="secondary-button" type="button" onClick={onRefresh} disabled={isRefreshDisabled}>
+        <RefreshCcw size={17} /> Refresh
+      </button>
+    </div>
   );
 }
 
@@ -568,6 +593,10 @@ function TripTimetable({
   options,
   outboundLegs,
   inboundLegs,
+  summaryTitle,
+  lastUpdated,
+  onRefresh,
+  isRefreshDisabled,
   requestedShoppingMinutes,
   showAllTrips,
   onShowMore,
@@ -575,6 +604,10 @@ function TripTimetable({
   options: TripOption[];
   outboundLegs: LegOption[];
   inboundLegs: LegOption[];
+  summaryTitle: string;
+  lastUpdated: Date | null;
+  onRefresh: () => void;
+  isRefreshDisabled: boolean;
   requestedShoppingMinutes: number;
   showAllTrips: boolean;
   onShowMore: () => void;
@@ -638,7 +671,10 @@ function TripTimetable({
     <>
       {visibleOutboundLegs.length > 0 && visibleInboundLegs.length > 0 && selectedOption ? (
         <div className="trip-picker" aria-live="polite">
-          <SelectedTrip option={selectedOption} requestedShoppingMinutes={requestedShoppingMinutes} />
+          <div className="trip-overview">
+            <PlanSummary title={summaryTitle} lastUpdated={lastUpdated} onRefresh={onRefresh} isRefreshDisabled={isRefreshDisabled} />
+            <SelectedTrip option={selectedOption} requestedShoppingMinutes={requestedShoppingMinutes} />
+          </div>
           <div className="leg-picker-grid">
             <LegPicker
               title="To supermarket"

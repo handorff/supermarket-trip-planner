@@ -98,7 +98,7 @@ h3 {
 
 .section-heading,
 .button-row,
-.sticky-summary,
+.plan-summary,
 .saved-list > div {
   align-items: center;
   display: flex;
@@ -226,7 +226,7 @@ select {
   color: white;
 }
 
-.sticky-summary {
+.plan-summary {
   background: #f1f5ef;
   border: 1px solid #d9e2d8;
   border-radius: 8px;
@@ -237,12 +237,12 @@ select {
   z-index: 2;
 }
 
-.sticky-summary div {
+.plan-summary div {
   display: grid;
   gap: 2px;
 }
 
-.sticky-summary span,
+.plan-summary span,
 .muted,
 .empty-state,
 small {
@@ -261,6 +261,23 @@ small {
   gap: 12px;
 }
 
+.trip-overview {
+  background: #e5f1eb;
+  border: 1px solid #b8d3c5;
+  border-radius: 8px;
+  overflow: hidden;
+  position: sticky;
+  top: 8px;
+  z-index: 2;
+}
+
+.trip-overview .plan-summary {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  position: static;
+}
+
 .selected-trip {
   background: #e5f1eb;
   border: 1px solid #b8d3c5;
@@ -271,13 +288,21 @@ small {
   padding: 12px;
 }
 
+.trip-overview .selected-trip {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid #b8d3c5;
+}
+
 .selected-trip.has-warning {
   background: #fffaf0;
   border-color: #f3d68c;
 }
 
 .selected-trip div {
-  display: grid;
+  align-content: start;
+  display: inline-grid;
   gap: 3px;
   min-width: 0;
 }
